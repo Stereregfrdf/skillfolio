@@ -1,0 +1,374 @@
+ <!-- Skillfolio HTML starter -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#10111b">
+  <title>Skillfolio — Developer Learning Roadmap</title>
+  <style>
+    :root {
+      --bg: #10111b;
+      --panel: #191b29;
+      --panel2: #202337;
+      --border: #303349;
+      --text: #f3f4ff;
+      --muted: #a0a4bd;
+      --accent: #a99bff;
+      --green: #61d6a3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .layout { min-height: 100vh; display: flex; }
+    aside {
+      width: 245px; flex-shrink: 0; padding: 25px 16px;
+      border-right: 1px solid var(--border); background: #141520;
+    }
+    .brand { font-size: 22px; font-weight: 800; padding: 0 10px 8px; }
+    .brand span { color: var(--accent); }
+    .subtitle { color: var(--muted); font-size: 12px; padding: 0 10px 27px; }
+    .section-label {
+      color: var(--muted); font-size: 11px; letter-spacing: 1.5px;
+      padding: 12px 10px; text-transform: uppercase;
+    }
+    .groups { display: grid; gap: 6px; }
+    .group-button {
+      border: 1px solid transparent; color: var(--muted);
+      background: transparent; border-radius: 10px; padding: 12px;
+      text-align: left; display: flex; gap: 10px; align-items: center;
+      width: 100%;
+    }
+    .group-button.active {
+      background: #292541; border-color: #4c426e; color: white;
+    }
+    .group-icon { width: 28px; height: 28px; object-fit: cover; border-radius: 7px; }
+    .group-emoji { font-size: 21px; width: 28px; text-align: center; }
+    .side-button, .button {
+      border: 1px solid var(--border); border-radius: 9px;
+      padding: 10px 13px; color: var(--text); background: var(--panel2);
+    }
+    .side-button { width: 100%; margin-top: 8px; }
+    .primary { background: var(--accent); color: #151323; border-color: var(--accent); font-weight: 700; }
+    main { flex: 1; min-width: 0; padding: 32px clamp(18px, 4vw, 54px); }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .eyebrow { color: var(--accent); font-size: 12px; letter-spacing: 2px; text-transform: uppercase; }
+    h1 { font-size: clamp(27px, 4vw, 39px); margin: 8px 0; letter-spacing: -1px; }
+    .muted { color: var(--muted); }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 30px 0; }
+    .stat, .roadmap-panel, .detail-panel {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 15px;
+    }
+    .stat { padding: 20px; }
+    .stat-label { color: var(--muted); font-size: 13px; }
+    .stat-value { font-size: 28px; font-weight: 750; margin: 12px 0 5px; }
+    .progress-track { height: 6px; background: #303349; border-radius: 8px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--green); border-radius: 8px; transition: width .2s; }
+    .roadmap-panel { padding: 24px; }
+    .panel-heading { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
+    h2 { font-size: 18px; margin: 0 0 8px; }
+    .roadmap { max-width: 760px; margin: 32px auto 10px; position: relative; }
+    .roadmap:before {
+      content: ""; position: absolute; top: 25px; bottom: 25px; left: 25px;
+      width: 2px; background: #37334f;
+    }
+    .node-row { display: flex; align-items: flex-start; gap: 18px; position: relative; margin-bottom: 25px; }
+    .node {
+      flex: 0 0 52px; height: 52px; border-radius: 50%;
+      background: var(--panel2); border: 2px solid #57516f;
+      color: white; font-size: 18px; z-index: 1;
+    }
+    .node.done { background: #173b32; border-color: var(--green); }
+    .node-content { flex: 1; min-width: 0; border: 1px solid var(--border); background: #1d1f30; border-radius: 12px; padding: 15px; }
+    .node-title { font-weight: 700; overflow-wrap: anywhere; }
+    .node-meta { color: var(--muted); font-size: 12px; margin-top: 7px; }
+    .node-description { font-size: 13px; color: #c3c5d8; margin-top: 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .node-actions { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 12px; }
+    .small-button { font-size: 12px; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--border); color: var(--text); background: #292b3e; }
+    .certificate-link { display: inline-block; color: var(--accent); margin-top: 10px; font-size: 13px; }
+    .empty { text-align: center; padding: 40px 15px; color: var(--muted); }
+    .footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
+    dialog { width: min(480px, calc(100% - 24px)); border: 1px solid var(--border); border-radius: 15px; background: var(--panel); color: var(--text); padding: 25px; }
+    dialog::backdrop { background: #070811cc; }
+    dialog h2 { margin-bottom: 20px; }
+    .field { display: grid; gap: 7px; margin-bottom: 15px; }
+    .field label { font-size: 13px; color: var(--muted); }
+    .field input, .field textarea {
+      background: #10111b; border: 1px solid var(--border); color: white;
+      border-radius: 8px; padding: 11px; width: 100%;
+    }
+    .field textarea { resize: vertical; min-height: 75px; }
+    .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+    @media (max-width: 760px) {
+      .layout { display: block; }
+      aside { width: 100%; border-right: 0; border-bottom: 1px solid var(--border); padding: 18px; }
+      .subtitle { padding-bottom: 12px; }
+      .groups { display: flex; overflow-x: auto; }
+      .group-button { width: auto; white-space: nowrap; }
+      .stats { gap: 8px; }
+      .stat { padding: 12px; }
+      .stat-value { font-size: 23px; }
+      main { padding: 24px 15px; }
+      .roadmap-panel { padding: 15px; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <div class="brand">skill<span>folio</span></div>
+    <div class="subtitle">YOUR DEVELOPER JOURNEY</div>
+    <div class="section-label">Learning groups</div>
+    <div id="groups" class="groups"></div>
+    <button class="side-button" id="addGroup">＋ New language group</button>
+    <button class="side-button" id="editGroup">⚙ Edit current group</button>
+    <div class="footer">A portfolio of progress, not just certificates.</div>
+  </aside>
+  <main>
+    <div class="topbar">
+      <div>
+        <div class="eyebrow">PERSONAL LEARNING ROADMAP</div>
+        <h1 id="groupTitle">Python</h1>
+        <div id="groupDescription" class="muted">Every milestone moves you forward.</div>
+      </div>
+      <div class="actions">
+        <button class="button" id="exportData">Export backup</button>
+        <button class="button primary" id="addCourse">＋ Add milestone</button>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">MILESTONES</div><div class="stat-value" id="total">0</div><div class="muted">Courses in this group</div></div>
+      <div class="stat"><div class="stat-label">COMPLETED</div><div class="stat-value" id="completed">0</div><div class="muted">Milestones achieved</div></div>
+      <div class="stat"><div class="stat-label">PROGRESS</div><div class="stat-value" id="percentage">0%</div><div class="progress-track"><div class="progress-fill" id="progressBar" style="width:0%"></div></div></div>
+    </div>
+    <section class="roadmap-panel">
+      <div class="panel-heading">
+        <div><h2>Learning pathway</h2><div class="muted" style="font-size:13px">Your journey, one node at a time.</div></div>
+        <div id="groupBadge" class="muted"></div>
+      </div>
+      <div id="roadmap" class="roadmap"></div>
+    </section>
+    <div class="footer">Skillfolio · Keep learning. Keep building.</div>
+  </main>
+</div>
+
+<dialog id="groupDialog">
+  <form id="groupForm">
+    <h2 id="groupDialogTitle">New language group</h2>
+    <div class="field"><label for="groupName">Group name</label><input id="groupName" required maxlength="60" placeholder="e.g. Python"></div>
+    <div class="field"><label for="groupIcon">Emoji or image URL</label><input id="groupIcon" maxlength="500" placeholder="🐍 or https://..."></div>
+    <div class="field"><label for="groupImage">Or upload a group icon</label><input id="groupImage" type="file" accept="image/*"></div>
+    <div class="field"><label for="groupColor">Accent colour</label><input id="groupColor" type="color" value="#a99bff"></div>
+    <div class="field"><label for="groupDesc">Description</label><textarea id="groupDesc" maxlength="300" placeholder="What are you learning?"></textarea></div>
+    <div class="dialog-actions"><button type="button" class="button" data-close>Cancel</button><button class="button primary" type="submit">Save group</button></div>
+  </form>
+</dialog>
+
+<dialog id="courseDialog">
+  <form id="courseForm">
+    <h2 id="courseDialogTitle">Add milestone</h2>
+    <div class="field"><label for="courseName">Course or milestone name</label><input id="courseName" required maxlength="100" placeholder="e.g. Python Fundamentals"></div>
+    <div class="field"><label for="courseDate">Completion date</label><input id="courseDate" type="date"></div>
+    <div class="field"><label for="courseDesc">Notes</label><textarea id="courseDesc" maxlength="1000" placeholder="Skills learned, projects built, etc."></textarea></div>
+    <div class="field"><label for="courseFile">Upload certificate (PDF or image)</label><input id="courseFile" type="file" accept=".pdf,image/*"></div>
+    <div class="field"><label for="courseUrl">Or certificate URL</label><input id="courseUrl" type="url" placeholder="https://..."></div>
+    <div class="field"><label><input id="courseDone" type="checkbox" style="width:auto"> Mark as completed</label></div>
+    <div class="dialog-actions"><button type="button" class="button" data-close>Cancel</button><button class="button primary" type="submit">Save milestone</button></div>
+  </form>
+</dialog>
+
+<script>
+(() => {
+  const KEY = "skillfolio-v1";
+  const $ = id => document.getElementById(id);
+  let state = {groups: [], selected: null};
+  let editingGroup = null, editingCourse = null, pendingGroupImage = null, pendingCertificate = null;
+
+  const uid = () => crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
+  const activeGroup = () => state.groups.find(g => g.id === state.selected) || state.groups[0];
+  const safe = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const isImage = value => /^data:image\/|^https:\/\//i.test(value || "");
+  const fileData = file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  async function load() {
+    try {
+      const saved = localStorage.getItem(KEY);
+      if (saved) state = JSON.parse(saved);
+    } catch (e) { console.error(e); }
+    if (!Array.isArray(state.groups)) state = {groups: [], selected: null};
+    if (!state.groups.length) {
+      const python = {id: uid(), name: "Python", icon: "🐍", color: "#a99bff", description: "Build your Python skills step by step.", courses: []};
+      const html = {id: uid(), name: "HTML & CSS", icon: "🌐", color: "#61d6a3", description: "Learn to build beautiful websites.", courses: []};
+      state = {groups: [python, html], selected: python.id};
+    }
+    if (!activeGroup()) state.selected = state.groups[0]?.id || null;
+    render();
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(state));
+      render();
+    } catch (e) {
+      alert("Browser storage is full. Try smaller certificate files or configure cloud storage.");
+    }
+  }
+
+  function render() {
+    const selected = activeGroup();
+    $("groups").innerHTML = "";
+    state.groups.forEach(g => {
+      const button = document.createElement("button");
+      button.className = "group-button" + (selected?.id === g.id ? " active" : "");
+      const icon = isImage(g.icon) ? `<img class="group-icon" src="${safe(g.icon)}" alt="">` : `<span class="group-emoji">${safe(g.icon || "📘")}</span>`;
+      button.innerHTML = `${icon}<span>${safe(g.name)}</span>`;
+      button.onclick = () => { state.selected = g.id; save(); };
+      $("groups").append(button);
+    });
+    if (!selected) return;
+    document.documentElement.style.setProperty("--accent", selected.color || "#a99bff");
+    $("groupTitle").textContent = selected.name;
+    $("groupDescription").textContent = selected.description || "Your learning journey.";
+    const courses = selected.courses || [];
+    const done = courses.filter(c => c.done).length;
+    const pct = courses.length ? Math.round(done / courses.length * 100) : 0;
+    $("total").textContent = courses.length;
+    $("completed").textContent = done;
+    $("percentage").textContent = pct + "%";
+    $("progressBar").style.width = pct + "%";
+    $("groupBadge").textContent = `${selected.icon && !isImage(selected.icon) ? selected.icon + " · " : ""}${courses.length} milestones`;
+    const road = $("roadmap");
+    road.innerHTML = "";
+    if (!courses.length) {
+      road.innerHTML = '<div class="empty">✦<br><br>No milestones yet.<br>Add your first course or Coddy certificate to begin.</div>';
+      return;
+    }
+    courses.forEach((c, index) => {
+      const row = document.createElement("div");
+      row.className = "node-row";
+      const node = document.createElement("button");
+      node.className = "node" + (c.done ? " done" : "");
+      node.textContent = c.done ? "✓" : String(index + 1).padStart(2, "0");
+      node.title = "Toggle completion";
+      node.onclick = () => { c.done = !c.done; save(); };
+      const content = document.createElement("div");
+      content.className = "node-content";
+      content.innerHTML = `<div class="node-title">${safe(c.name)}</div><div class="node-meta">${c.done ? "✓ COMPLETED" : "○ IN PROGRESS"}${c.date ? " · " + safe(c.date) : ""}</div>${c.description ? `<div class="node-description">${safe(c.description)}</div>` : ""}`;
+      if (c.certificate) {
+        const link = document.createElement("a");
+        link.className = "certificate-link";
+        link.href = c.certificate;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "↗ View certificate";
+        content.append(link);
+      } else if (c.certificateUrl) {
+        const link = document.createElement("a");
+        link.className = "certificate-link";
+        link.href = c.certificateUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "↗ View certificate";
+        content.append(link);
+      }
+      const actions = document.createElement("div");
+      actions.className = "node-actions";
+      const edit = document.createElement("button");
+      edit.className = "small-button"; edit.textContent = "Edit";
+      edit.onclick = () => openCourse(c.id);
+      const remove = document.createElement("button");
+      remove.className = "small-button"; remove.textContent = "Delete";
+      remove.onclick = () => { if (confirm("Delete this milestone?")) { selected.courses = selected.courses.filter(x => x.id !== c.id); save(); } };
+      actions.append(edit, remove); content.append(actions); row.append(node, content); road.append(row);
+    });
+  }
+
+  function openGroup(id = null) {
+    editingGroup = id;
+    const g = state.groups.find(x => x.id === id);
+    $("groupDialogTitle").textContent = g ? "Edit language group" : "New language group";
+    $("groupName").value = g?.name || "";
+    $("groupIcon").value = g?.icon && !g.icon.startsWith("data:") ? g.icon : "";
+    $("groupColor").value = g?.color || "#a99bff";
+    $("groupDesc").value = g?.description || "";
+    $("groupImage").value = "";
+    pendingGroupImage = null;
+    $("groupDialog").showModal();
+  }
+
+  function openCourse(id = null) {
+    const g = activeGroup();
+    if (!g) return;
+    editingCourse = id;
+    const c = g.courses.find(x => x.id === id);
+    $("courseDialogTitle").textContent = c ? "Edit milestone" : "Add milestone";
+    $("courseName").value = c?.name || "";
+    $("courseDate").value = c?.date || "";
+    $("courseDesc").value = c?.description || "";
+    $("courseDone").checked = c?.done || false;
+    $("courseUrl").value = c?.certificateUrl || "";
+    $("courseFile").value = "";
+    pendingCertificate = null;
+    $("courseDialog").showModal();
+  }
+
+  $("addGroup").onclick = () => openGroup();
+  $("editGroup").onclick = () => { const g = activeGroup(); if (g) openGroup(g.id); };
+  $("addCourse").onclick = () => openCourse();
+  document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => b.closest("dialog").close());
+  $("groupImage").onchange = async e => { const f = e.target.files[0]; if (f) { if (f.size > 500000) return alert("For this demo, choose an icon under 500 KB."); pendingGroupImage = await fileData(f); } };
+  $("courseFile").onchange = async e => { const f = e.target.files[0]; if (f) { if (f.size > 300000) return alert("For this demo, choose a certificate under 300 KB. Cloud storage will support larger files."); pendingCertificate = await fileData(f); } };
+
+  $("groupForm").onsubmit = async e => {
+    e.preventDefault();
+    const name = $("groupName").value.trim();
+    if (!name) return;
+    let g = state.groups.find(x => x.id === editingGroup);
+    if (!g) { g = {id: uid(), courses: []}; state.groups.push(g); }
+    g.name = name;
+    const icon = $("groupIcon").value.trim();
+    g.icon = pendingGroupImage || icon || g.icon || "📘";
+    g.color = $("groupColor").value;
+    g.description = $("groupDesc").value.trim();
+    state.selected = g.id;
+    $("groupDialog").close(); save();
+  };
+
+  $("courseForm").onsubmit = e => {
+    e.preventDefault();
+    const g = activeGroup();
+    if (!g) return;
+    let c = g.courses.find(x => x.id === editingCourse);
+    if (!c) { c = {id: uid()}; g.courses.push(c); }
+    c.name = $("courseName").value.trim();
+    c.date = $("courseDate").value;
+    c.description = $("courseDesc").value.trim();
+    c.done = $("courseDone").checked;
+    c.certificateUrl = $("courseUrl").value.trim();
+    if (pendingCertificate) c.certificate = pendingCertificate;
+    $("courseDialog").close(); save();
+  };
+
+  $("exportData").onclick = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "skillfolio-backup.json"; a.click();
+    URL.revokeObjectURL(url);
+  };
+  load();
+})();
+</script>
+</body>
+</html>
