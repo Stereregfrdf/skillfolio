@@ -395,7 +395,11 @@
       const remove = document.createElement("button");
       remove.className = "small-button"; remove.textContent = "Delete";
       remove.onclick = () => { if (confirm("Delete this milestone?")) { selected.courses = selected.courses.filter(x => x.id !== c.id); save(); } };
-      actions.append(edit, remove); content.append(actions); row.append(node, content); road.append(row);
+      if (isAdmin) {
+         actions.append(edit, remove);
+      }
+      content.append(actions); 
+      row.append(node, content); road.append(row);
     });
   }
 
