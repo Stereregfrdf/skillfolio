@@ -1,10 +1,17 @@
 
 import { getStore } from "@netlify/blobs";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
-const store = getStore("skillfolio-shared-data");
-const STATE_KEY = "state-v1";
+const STORE_NAME = "skillfolio-shared-data";
+const STORE_KEY = "state-v1";
 const COOKIE_NAME = "skillfolio_admin";
-const SESSION_SECONDS = 60 * 60 * 12;
+const SESSION_DURATION = 8 * 60 * 60 * 1000; // 8 hours
+
+const store = getStore(STORE_NAME);
+
+// --------------------------------------------------
+// DEFAULT DATA
+// --------------------------------------------------
 
 function defaults() {
   const python = {
@@ -15,6 +22,7 @@ function defaults() {
     description: "Build your Python skills step by step.",
     courses: []
   };
+
   const html = {
     id: "html-css",
     name: "HTML & CSS",
@@ -23,273 +31,373 @@ function defaults() {
     description: "Learn to build beautiful websites.",
     courses: []
   };
-  return { groups: [python, html], selected: python.id };
+
+  return {
+    groups: [python, html],
+    selected: python.id
+  };
 }
 
-function json(body, status = 200, headers = {}) {
-  return new Response(JSON.stringify(body), {
+// --------------------------------------------------
+// HTTP RESPONSES
+// --------------------------------------------------
+
+function json(data, status = 200, extraHeaders = {}) {
+  return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
-      ...headers
+      ...extraHeaders
     }
   });
 }
 
-function parseBody(event) {
+function error(message, status = 400) {
+  return json({ error: message }, status);
+}
+
+// --------------------------------------------------
+// REQUEST BODY
+// --------------------------------------------------
+
+async function readBody(request) {
   try {
-    return JSON.parse(event.body || "{}");
+    return await request.json();
   } catch {
     return {};
   }
 }
 
-function base64url(bytes) {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
+// --------------------------------------------------
+// SHARED DATABASE
+// --------------------------------------------------
+
+async function readState() {
+  const saved = await store.get(STORE_KEY, {
+    type: "json"
+  });
+
+  if (
+    saved &&
+    Array.isArray(saved.groups) &&
+    saved.groups.length > 0
+  ) {
+    return {
+      initialized: true,
+      state: saved
+    };
+  }
+
+  return {
+    initialized: false,
+    state: defaults()
+  };
 }
 
-function fromBase64url(value) {
-  const normal = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normal + "=".repeat((4 - normal.length % 4) % 4);
-  const binary = atob(padded);
-  return Uint8Array.from(binary, c => c.charCodeAt(0));
+async function writeState(state) {
+  await store.setJSON(STORE_KEY, state);
 }
 
-async function sign(value, secret) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  return base64url(
-    new Uint8Array(
-      await crypto.subtle.sign(
-        "HMAC",
-        key,
-        new TextEncoder().encode(value)
-      )
+// --------------------------------------------------
+// ADMIN SESSION
+// --------------------------------------------------
+
+function sessionSecret() {
+  return process.env.SKILLFOLIO_SESSION_SECRET || "";
+}
+
+function sign(value) {
+  return createHmac("sha256", sessionSecret())
+    .update(value)
+    .digest("base64url");
+}
+
+function createSession() {
+  const payload = Buffer.from(
+    JSON.stringify({
+      exp: Date.now() + SESSION_DURATION
+    })
+  ).toString("base64url");
+
+  return `${payload}.${sign(payload)}`;
+}
+
+function verifySession(request) {
+  const secret = sessionSecret();
+
+  if (!secret) return false;
+
+  const cookieHeader = request.headers.get("cookie") || "";
+
+  const cookie = cookieHeader
+    .split(";")
+    .map(part => part.trim())
+    .find(part => part.startsWith(COOKIE_NAME + "="));
+
+  if (!cookie) return false;
+
+  const token = cookie.slice(COOKIE_NAME.length + 1);
+  const separator = token.lastIndexOf(".");
+
+  if (separator < 1) return false;
+
+  const payload = token.slice(0, separator);
+  const signature = token.slice(separator + 1);
+  const expected = sign(payload);
+
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+
+  if (actualBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  if (!timingSafeEqual(actualBuffer, expectedBuffer)) {
+    return false;
+  }
+
+  try {
+    const data = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8")
+    );
+
+    return Number.isFinite(data.exp) && data.exp > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function sessionCookie(token) {
+  return [
+    `${COOKIE_NAME}=${token}`,
+    "Path=/",
+    "HttpOnly",
+    "Secure",
+    "SameSite=Lax",
+    `Max-Age=${Math.floor(SESSION_DURATION / 1000)}`
+  ].join("; ");
+}
+
+function clearSessionCookie() {
+  return [
+    `${COOKIE_NAME}=`,
+    "Path=/",
+    "HttpOnly",
+    "Secure",
+    "SameSite=Lax",
+    "Max-Age=0"
+  ].join("; ");
+}
+
+// --------------------------------------------------
+// VALIDATION
+// --------------------------------------------------
+
+function validState(state) {
+  return (
+    state &&
+    typeof state === "object" &&
+    Array.isArray(state.groups) &&
+    state.groups.length > 0 &&
+    state.groups.length <= 100 &&
+    state.groups.every(group =>
+      group &&
+      typeof group.id === "string" &&
+      typeof group.name === "string" &&
+      group.name.trim().length > 0 &&
+      Array.isArray(group.courses)
     )
   );
 }
 
-async function verifyAdmin(event) {
-  const secret = process.env.SKILLFOLIO_SESSION_SECRET;
-  if (!secret) return false;
-
-  const cookieHeader = event.headers.cookie || event.headers.Cookie || "";
-  const cookie = cookieHeader
-    .split(";")
-    .map(x => x.trim())
-    .find(x => x.startsWith(COOKIE_NAME + "="));
-
-  if (!cookie) return false;
-
-  let token;
-  try {
-    token = decodeURIComponent(cookie.slice(COOKIE_NAME.length + 1));
-  } catch {
+// Only allow course progress to change through PATCH.
+// Group names, icons, colours, descriptions and IDs
+// must be changed through the admin-only PUT endpoint.
+function sameGroupMetadata(oldState, newState) {
+  if (oldState.groups.length !== newState.groups.length) {
     return false;
   }
 
-  const dot = token.indexOf(".");
-  if (dot < 1) return false;
+  const oldGroups = new Map(
+    oldState.groups.map(group => [group.id, group])
+  );
 
-  const payload = token.slice(0, dot);
-  const signature = token.slice(dot + 1);
+  for (const group of newState.groups) {
+    const oldGroup = oldGroups.get(group.id);
 
-  let decoded;
-  try {
-    decoded = JSON.parse(
-      new TextDecoder().decode(fromBase64url(payload))
-    );
-  } catch {
-    return false;
+    if (!oldGroup) return false;
+
+    const oldMetadata = {
+      id: oldGroup.id,
+      name: oldGroup.name,
+      icon: oldGroup.icon,
+      color: oldGroup.color,
+      description: oldGroup.description
+    };
+
+    const newMetadata = {
+      id: group.id,
+      name: group.name,
+      icon: group.icon,
+      color: group.color,
+      description: group.description
+    };
+
+    if (
+      JSON.stringify(oldMetadata) !==
+      JSON.stringify(newMetadata)
+    ) {
+      return false;
+    }
   }
 
-  if (!decoded.exp || decoded.exp < Math.floor(Date.now() / 1000)) {
-    return false;
-  }
-
-  const expected = await sign(payload, secret);
-  if (signature.length !== expected.length) return false;
-
-  let diff = 0;
-  for (let i = 0; i < signature.length; i++) {
-    diff |= signature.charCodeAt(i) ^ expected.charCodeAt(i);
-  }
-
-  return diff === 0 && decoded.role === "admin";
+  return true;
 }
 
-function validState(value) {
-  return value &&
-    Array.isArray(value.groups) &&
-    value.groups.length <= 100 &&
-    value.groups.every(g =>
-      g &&
-      typeof g.id === "string" &&
-      g.id.length <= 100 &&
-      typeof g.name === "string" &&
-      g.name.trim().length > 0 &&
-      g.name.length <= 60 &&
-      typeof g.icon === "string" &&
-      g.icon.length <= 800000 &&
-      typeof g.color === "string" &&
-      /^#[0-9a-f]{6}$/i.test(g.color) &&
-      typeof (g.description ?? "") === "string" &&
-      (g.description ?? "").length <= 300 &&
-      Array.isArray(g.courses) &&
-      g.courses.length <= 2000
-    );
-}
+// --------------------------------------------------
+// MAIN NETLIFY FUNCTION
+// --------------------------------------------------
 
-function groupMetadata(group) {
-  return {
-    id: group.id,
-    name: group.name,
-    icon: group.icon,
-    color: group.color,
-    description: group.description || ""
-  };
-}
-
-export default async function handler(event) {
-  const method = event.httpMethod;
-  const body = parseBody(event);
+export default async function handler(request) {
+  const method = request.method.toUpperCase();
 
   try {
+    // GET: Anyone can view the shared roadmap.
     if (method === "GET") {
-      const stored = await store.get(STATE_KEY, { type: "json" });
+      const result = await readState();
+
       return json({
-        state: stored || defaults(),
-        initialized: !!stored,
-        admin: await verifyAdmin(event)
+        initialized: result.initialized,
+        state: result.state,
+        admin: verifySession(request)
       });
     }
 
-    if (method === "POST" && body.action === "login") {
-      const password = process.env.SKILLFOLIO_PASSWORD;
-      const secret = process.env.SKILLFOLIO_SESSION_SECRET;
+    // POST: Login or logout.
+    if (method === "POST") {
+      const body = await readBody(request);
 
-      if (!password || !secret) {
-        return json({
-          error: "Netlify environment variables are not configured yet."
-        }, 503);
-      }
+      if (body.action === "login") {
+        const configuredPassword =
+          process.env.SKILLFOLIO_PASSWORD;
 
-      if (typeof body.password !== "string" || body.password !== password) {
-        return json({ error: "Incorrect password." }, 401);
-      }
-
-      const exp = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
-      const payload = base64url(
-        new TextEncoder().encode(JSON.stringify({ role: "admin", exp }))
-      );
-      const token = payload + "." + await sign(payload, secret);
-
-      const cookie =
-        `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_SECONDS}`;
-
-      const stored = await store.get(STATE_KEY, { type: "json" });
-
-      return json({
-        ok: true,
-        state: stored || defaults(),
-        initialized: !!stored
-      }, 200, { "Set-Cookie": cookie });
-    }
-
-    if (method === "POST" && body.action === "logout") {
-      return json({ ok: true }, 200, {
-        "Set-Cookie":
-          `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`
-      });
-    }
-
-    if (method === "PUT") {
-      if (!await verifyAdmin(event)) {
-        return json({
-          error: "Unlock group editing to make language-group changes."
-        }, 401);
-      }
-
-      const next = body.state;
-      if (!validState(next)) {
-        return json({ error: "The submitted data is invalid or too large." }, 400);
-      }
-
-      const normalized = {
-        groups: next.groups,
-        selected: next.groups.some(g => g.id === next.selected)
-          ? next.selected
-          : (next.groups[0]?.id || null)
-      };
-
-      await store.setJSON(STATE_KEY, normalized);
-      return json({ ok: true, state: normalized, initialized: true });
-    }
-
-    if (method === "PATCH") {
-      const current = await store.get(STATE_KEY, { type: "json" });
-
-      if (!current) {
-        return json({
-          error: "The site owner needs to publish the shared data first."
-        }, 409);
-      }
-
-      const next = body.state;
-
-      if (!validState(next) || next.groups.length !== current.groups.length) {
-        return json({
-          error: "Only course progress can be changed without group-editing permission."
-        }, 403);
-      }
-
-      const oldById = new Map(current.groups.map(g => [g.id, g]));
-
-      for (const incoming of next.groups) {
-        const old = oldById.get(incoming.id);
-
-        if (!old ||
-            JSON.stringify(groupMetadata(incoming)) !==
-            JSON.stringify(groupMetadata(old))) {
-          return json({
-            error: "Adding, removing, or editing language groups requires the owner password."
-          }, 403);
+        if (!configuredPassword || !sessionSecret()) {
+          return error(
+            "Server login is not configured. Check the Netlify environment variables.",
+            500
+          );
         }
+
+        if (
+          typeof body.password !== "string" ||
+          body.password !== configuredPassword
+        ) {
+          return error("Incorrect password.", 401);
+        }
+
+        const result = await readState();
+        const token = createSession();
+
+        return json(
+          {
+            success: true,
+            admin: true,
+            initialized: result.initialized,
+            state: result.state
+          },
+          200,
+          {
+            "Set-Cookie": sessionCookie(token)
+          }
+        );
       }
 
-      const normalized = {
-        groups: current.groups.map(old => ({
-          ...old,
-          courses: next.groups.find(g => g.id === old.id).courses
-        })),
-        selected: current.groups.some(g => g.id === next.selected)
-          ? next.selected
-          : (current.groups[0]?.id || null)
-      };
+      if (body.action === "logout") {
+        return json(
+          { success: true, admin: false },
+          200,
+          {
+            "Set-Cookie": clearSessionCookie()
+          }
+        );
+      }
 
-      await store.setJSON(STATE_KEY, normalized);
-      return json({ ok: true, state: normalized, initialized: true });
+      return error("Unknown POST action.", 400);
     }
 
-    return json({ error: "Method not allowed." }, 405, {
-      Allow: "GET, POST, PUT, PATCH"
-    });
-  } catch (error) {
-    console.error("Skillfolio API error", error);
-    return json({
-      error: "The shared database request failed. Check the Netlify function logs."
-    }, 500);
+    // All changes below require an admin session.
+    if (method === "PUT" || method === "PATCH") {
+      if (!verifySession(request)) {
+        return error(
+          "You must unlock group editing before saving changes.",
+          401
+        );
+      }
+
+      const body = await readBody(request);
+      const newState = body.state;
+
+      if (!validState(newState)) {
+        return error("The supplied Skillfolio data is invalid.", 400);
+      }
+
+      // PUT: Admin can add, edit, and remove groups.
+      if (method === "PUT") {
+        await writeState(newState);
+
+        return json({
+          success: true,
+          initialized: true,
+          state: newState
+        });
+      }
+
+      // PATCH: Only course/progress data can change.
+      const current = await readState();
+
+      if (!current.initialized) {
+        return error(
+          "Publish the starter data before syncing progress.",
+          409
+        );
+      }
+
+      if (!sameGroupMetadata(current.state, newState)) {
+        return error(
+          "Group settings can only be changed using admin group editing.",
+          403
+        );
+      }
+
+      const existingIds = new Set(
+        current.state.groups.map(group => group.id)
+      );
+
+      if (!existingIds.has(newState.selected)) {
+        return error("The selected group does not exist.", 400);
+      }
+
+      await writeState(newState);
+
+      return json({
+        success: true,
+        initialized: true,
+        state: newState
+      });
+    }
+
+    return json(
+      { error: "Method not allowed." },
+      405,
+      { Allow: "GET, POST, PUT, PATCH" }
+    );
+  } catch (err) {
+    console.error("Skillfolio API error:", err);
+
+    return error(
+      "The shared database encountered an error. Check the Netlify function logs.",
+      500
+    );
   }
 }
-
