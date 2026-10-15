@@ -127,8 +127,11 @@
     <div class="subtitle">YOUR DEVELOPER JOURNEY</div>
     <div class="section-label">Learning groups</div>
     <div id="groups" class="groups"></div>
-    <button class="side-button" id="addGroup">＋ New language group</button>
-    <button class="side-button" id="editGroup">⚙ Edit current group</button>
+    <button class="side-button" id="unlockAdmin">🔒 Unlock group editing</button>
+    <button class="side-button" id="lockAdmin" hidden>🔐 Lock editing</button>
+    <button class="side-button" id="addGroup" hidden>＋ New language group</button>
+    <button class="side-button" id="editGroup" hidden>⚙ Edit current group</button>
+    <div id="syncStatus" class="footer">Connecting to shared database…</div>
     <div class="footer">A portfolio of progress, not just certificates.</div>
   </aside>
   <main>
@@ -187,46 +190,147 @@
 <script>
 (() => {
   const KEY = "skillfolio-v1";
+  const API = "/api/groups";
   const $ = id => document.getElementById(id);
   let state = {groups: [], selected: null};
   let editingGroup = null, editingCourse = null, pendingGroupImage = null, pendingCertificate = null;
+  let isAdmin = false, stateIsLocalDraft = false, serverInitialized = false;
 
   const uid = () => crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
   const activeGroup = () => state.groups.find(g => g.id === state.selected) || state.groups[0];
   const safe = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  const isImage = value => /^data:image\/|^https:\/\//i.test(value || "");
+  const isImage = value => /^data:image\//i.test(value || "") || /^https:\/\//i.test(value || "");
   const fileData = file => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-
+  function defaults() {
+    const python = {id: "python", name: "Python", icon: "🐍", color: "#a99bff", description: "Build your Python skills step by step.", courses: []};
+    const html = {id: "html-css", name: "HTML & CSS", icon: "🌐", color: "#61d6a3", description: "Learn to build beautiful websites.", courses: []};
+    return {groups: [python, html], selected: python.id};
+  }
+  function setStatus(message) { $("syncStatus").textContent = message; }
+  function updateAdminUI() {
+    $("unlockAdmin").hidden = isAdmin;
+    $("lockAdmin").hidden = !isAdmin;
+    $("addGroup").hidden = !isAdmin;
+    $("editGroup").hidden = !isAdmin;
+  }
+  async function apiRequest(method = "GET", payload = null) {
+    const options = {method, headers: {"Content-Type": "application/json"}, credentials: "same-origin"};
+    if (payload !== null) options.body = JSON.stringify(payload);
+    const response = await fetch(API, options);
+    let data = {};
+    try { data = await response.json(); } catch (_) {}
+    if (!response.ok) throw new Error(data.error || `Server error (${response.status})`);
+    return data;
+  }
   async function load() {
     try {
-      const saved = localStorage.getItem(KEY);
-      if (saved) state = JSON.parse(saved);
-    } catch (e) { console.error(e); }
-    if (!Array.isArray(state.groups)) state = {groups: [], selected: null};
-    if (!state.groups.length) {
-      const python = {id: uid(), name: "Python", icon: "🐍", color: "#a99bff", description: "Build your Python skills step by step.", courses: []};
-      const html = {id: uid(), name: "HTML & CSS", icon: "🌐", color: "#61d6a3", description: "Learn to build beautiful websites.", courses: []};
-      state = {groups: [python, html], selected: python.id};
+      const remote = await apiRequest("GET");
+      serverInitialized = !!remote.initialized;
+      isAdmin = !!remote.admin;
+      if (serverInitialized) {
+        state = remote.state;
+        stateIsLocalDraft = false;
+        try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {}
+        setStatus("✓ Synced with shared database");
+      } else {
+        let local = null;
+        try { local = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (_) {}
+        state = local && Array.isArray(local.groups) && local.groups.length ? local : (remote.state || defaults());
+        stateIsLocalDraft = true;
+        setStatus(local ? "Local data found — unlock editing to publish it for everyone" : "Database ready — unlock editing to publish the starter groups");
+      }
+    } catch (error) {
+      console.error(error);
+      let local = null;
+      try { local = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (_) {}
+      state = local && Array.isArray(local.groups) ? local : defaults();
+      stateIsLocalDraft = true;
+      setStatus("⚠ Database unavailable — changes may only stay in this browser");
     }
+    if (!Array.isArray(state.groups)) state = defaults();
     if (!activeGroup()) state.selected = state.groups[0]?.id || null;
+    updateAdminUI();
+    render();
+  }
+  async function save(mode = "courses") {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {}
+    if (mode === "groups") {
+      if (!isAdmin) { alert("Unlock group editing first."); return false; }
+      try {
+        const result = await apiRequest("PUT", {state});
+        state = result.state || state;
+        serverInitialized = true;
+        stateIsLocalDraft = false;
+        localStorage.setItem(KEY, JSON.stringify(state));
+        setStatus("✓ Language groups saved for everyone");
+        render();
+        return true;
+      } catch (error) {
+        alert("Could not save language groups: " + error.message);
+        setStatus("⚠ Group changes were not synced");
+        return false;
+      }
+    }
+    render();
+    if (!serverInitialized || stateIsLocalDraft) {
+      setStatus(isAdmin ? "Unlock/publish your local data to sync it for everyone" : "Local changes only until the site owner publishes shared data");
+      return true;
+    }
+    try {
+      const result = await apiRequest("PATCH", {state});
+      if (result.state) state = result.state;
+      localStorage.setItem(KEY, JSON.stringify(state));
+      setStatus("✓ Progress synced for everyone");
+      render();
+      return true;
+    } catch (error) {
+      console.error(error);
+      setStatus("⚠ Could not sync progress: " + error.message);
+      alert("Your change could not be synced to everyone. " + error.message);
+      return false;
+    }
+  }
+  async function unlockAdmin() {
+    const password = prompt("Enter the Skillfolio group-editing password:");
+    if (password === null) return;
+    try {
+      const result = await apiRequest("POST", {action: "login", password});
+      isAdmin = true;
+      updateAdminUI();
+      serverInitialized = !!result.initialized;
+      if (serverInitialized && result.state) state = result.state;
+      if (!serverInitialized || stateIsLocalDraft) {
+        const publish = confirm("Publish this browser's current Skillfolio data to the shared database? It will become the version everyone sees.");
+        if (publish) {
+          const saved = await save("groups");
+          if (!saved) return;
+        } else {
+          setStatus("Editing unlocked — local data has not been published");
+        }
+      } else {
+        stateIsLocalDraft = false;
+        setStatus("✓ Group editing unlocked");
+      }
+      render();
+    } catch (error) {
+      alert("Could not unlock editing: " + error.message);
+    }
+  }
+  async function lockAdmin() {
+    try { await apiRequest("POST", {action: "logout"}); } catch (_) {}
+    isAdmin = false;
+    updateAdminUI();
+    setStatus(serverInitialized ? "✓ Shared database connected · view mode" : "Local data not yet published");
     render();
   }
 
-  function save() {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state));
-      render();
-    } catch (e) {
-      alert("Browser storage is full. Try smaller certificate files or configure cloud storage.");
-    }
-  }
-
   function render() {
+    updateAdminUI();
     const selected = activeGroup();
     $("groups").innerHTML = "";
     state.groups.forEach(g => {
@@ -324,8 +428,10 @@
     $("courseDialog").showModal();
   }
 
-  $("addGroup").onclick = () => openGroup();
-  $("editGroup").onclick = () => { const g = activeGroup(); if (g) openGroup(g.id); };
+  $("unlockAdmin").onclick = unlockAdmin;
+  $("lockAdmin").onclick = lockAdmin;
+  $("addGroup").onclick = () => { if (isAdmin) openGroup(); };
+  $("editGroup").onclick = () => { const g = activeGroup(); if (isAdmin && g) openGroup(g.id); };
   $("addCourse").onclick = () => openCourse();
   document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => b.closest("dialog").close());
   $("groupImage").onchange = async e => { const f = e.target.files[0]; if (f) { if (f.size > 500000) return alert("For this demo, choose an icon under 500 KB."); pendingGroupImage = await fileData(f); } };
@@ -333,6 +439,7 @@
 
   $("groupForm").onsubmit = async e => {
     e.preventDefault();
+    if (!isAdmin) return alert("Unlock group editing first.");
     const name = $("groupName").value.trim();
     if (!name) return;
     let g = state.groups.find(x => x.id === editingGroup);
@@ -343,7 +450,7 @@
     g.color = $("groupColor").value;
     g.description = $("groupDesc").value.trim();
     state.selected = g.id;
-    $("groupDialog").close(); save();
+    $("groupDialog").close(); await save("groups");
   };
 
   $("courseForm").onsubmit = e => {
