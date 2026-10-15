@@ -5,13 +5,9 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 const STORE_NAME = "skillfolio-shared-data";
 const STORE_KEY = "state-v1";
 const COOKIE_NAME = "skillfolio_admin";
-const SESSION_DURATION = 8 * 60 * 60 * 1000; // 8 hours
+const SESSION_DURATION = 8 * 60 * 60 * 1000;
 
 const store = getStore(STORE_NAME);
-
-// --------------------------------------------------
-// DEFAULT DATA
-// --------------------------------------------------
 
 function defaults() {
   const python = {
@@ -38,10 +34,6 @@ function defaults() {
   };
 }
 
-// --------------------------------------------------
-// HTTP RESPONSES
-// --------------------------------------------------
-
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -57,10 +49,6 @@ function error(message, status = 400) {
   return json({ error: message }, status);
 }
 
-// --------------------------------------------------
-// REQUEST BODY
-// --------------------------------------------------
-
 async function readBody(request) {
   try {
     return await request.json();
@@ -69,39 +57,19 @@ async function readBody(request) {
   }
 }
 
-// --------------------------------------------------
-// SHARED DATABASE
-// --------------------------------------------------
-
 async function readState() {
-  const saved = await store.get(STORE_KEY, {
-    type: "json"
-  });
+  const saved = await store.get(STORE_KEY, { type: "json" });
 
-  if (
-    saved &&
-    Array.isArray(saved.groups) &&
-    saved.groups.length > 0
-  ) {
-    return {
-      initialized: true,
-      state: saved
-    };
+  if (saved && Array.isArray(saved.groups) && saved.groups.length > 0) {
+    return { initialized: true, state: saved };
   }
 
-  return {
-    initialized: false,
-    state: defaults()
-  };
+  return { initialized: false, state: defaults() };
 }
 
 async function writeState(state) {
   await store.setJSON(STORE_KEY, state);
 }
-
-// --------------------------------------------------
-// ADMIN SESSION
-// --------------------------------------------------
 
 function sessionSecret() {
   return process.env.SKILLFOLIO_SESSION_SECRET || "";
@@ -114,19 +82,15 @@ function sign(value) {
 }
 
 function createSession() {
-  const payload = Buffer.from(
-    JSON.stringify({
-      exp: Date.now() + SESSION_DURATION
-    })
-  ).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({
+    exp: Date.now() + SESSION_DURATION
+  })).toString("base64url");
 
   return `${payload}.${sign(payload)}`;
 }
 
 function verifySession(request) {
-  const secret = sessionSecret();
-
-  if (!secret) return false;
+  if (!sessionSecret()) return false;
 
   const cookieHeader = request.headers.get("cookie") || "";
 
@@ -149,13 +113,8 @@ function verifySession(request) {
   const actualBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expected);
 
-  if (actualBuffer.length !== expectedBuffer.length) {
-    return false;
-  }
-
-  if (!timingSafeEqual(actualBuffer, expectedBuffer)) {
-    return false;
-  }
+  if (actualBuffer.length !== expectedBuffer.length) return false;
+  if (!timingSafeEqual(actualBuffer, expectedBuffer)) return false;
 
   try {
     const data = JSON.parse(
@@ -190,12 +149,8 @@ function clearSessionCookie() {
   ].join("; ");
 }
 
-// --------------------------------------------------
-// VALIDATION
-// --------------------------------------------------
-
 function validState(state) {
-  return (
+  return Boolean(
     state &&
     typeof state === "object" &&
     Array.isArray(state.groups) &&
@@ -211,13 +166,8 @@ function validState(state) {
   );
 }
 
-// Only allow course progress to change through PATCH.
-// Group names, icons, colours, descriptions and IDs
-// must be changed through the admin-only PUT endpoint.
 function sameGroupMetadata(oldState, newState) {
-  if (oldState.groups.length !== newState.groups.length) {
-    return false;
-  }
+  if (oldState.groups.length !== newState.groups.length) return false;
 
   const oldGroups = new Map(
     oldState.groups.map(group => [group.id, group])
@@ -225,7 +175,6 @@ function sameGroupMetadata(oldState, newState) {
 
   for (const group of newState.groups) {
     const oldGroup = oldGroups.get(group.id);
-
     if (!oldGroup) return false;
 
     const oldMetadata = {
@@ -255,15 +204,12 @@ function sameGroupMetadata(oldState, newState) {
   return true;
 }
 
-// --------------------------------------------------
-// MAIN NETLIFY FUNCTION
-// --------------------------------------------------
-
+// Netlify Functions v2 Request/Response handler.
 export default async function handler(request) {
   const method = request.method.toUpperCase();
 
   try {
-    // GET: Anyone can view the shared roadmap.
+    // Anyone can view the shared roadmap.
     if (method === "GET") {
       const result = await readState();
 
@@ -274,7 +220,7 @@ export default async function handler(request) {
       });
     }
 
-    // POST: Login or logout.
+    // Admin login and logout.
     if (method === "POST") {
       const body = await readBody(request);
 
@@ -284,7 +230,7 @@ export default async function handler(request) {
 
         if (!configuredPassword || !sessionSecret()) {
           return error(
-            "Server login is not configured. Check the Netlify environment variables.",
+            "Server login is not configured. Check Netlify environment variables.",
             500
           );
         }
@@ -297,40 +243,34 @@ export default async function handler(request) {
         }
 
         const result = await readState();
-        const token = createSession();
 
-        return json(
-          {
-            success: true,
-            admin: true,
-            initialized: result.initialized,
-            state: result.state
-          },
-          200,
-          {
-            "Set-Cookie": sessionCookie(token)
-          }
-        );
+        return json({
+          success: true,
+          admin: true,
+          initialized: result.initialized,
+          state: result.state
+        }, 200, {
+          "Set-Cookie": sessionCookie(createSession())
+        });
       }
 
       if (body.action === "logout") {
-        return json(
-          { success: true, admin: false },
-          200,
-          {
-            "Set-Cookie": clearSessionCookie()
-          }
-        );
+        return json({
+          success: true,
+          admin: false
+        }, 200, {
+          "Set-Cookie": clearSessionCookie()
+        });
       }
 
       return error("Unknown POST action.", 400);
     }
 
-    // All changes below require an admin session.
+    // All changes require a valid admin session.
     if (method === "PUT" || method === "PATCH") {
       if (!verifySession(request)) {
         return error(
-          "You must unlock group editing before saving changes.",
+          "Unlock editing with the admin password before saving changes.",
           401
         );
       }
@@ -342,7 +282,7 @@ export default async function handler(request) {
         return error("The supplied Skillfolio data is invalid.", 400);
       }
 
-      // PUT: Admin can add, edit, and remove groups.
+      // PUT: admin can add, edit and delete language groups.
       if (method === "PUT") {
         await writeState(newState);
 
@@ -353,7 +293,7 @@ export default async function handler(request) {
         });
       }
 
-      // PATCH: Only course/progress data can change.
+      // PATCH: only milestone/progress data can change.
       const current = await readState();
 
       if (!current.initialized) {
@@ -365,16 +305,14 @@ export default async function handler(request) {
 
       if (!sameGroupMetadata(current.state, newState)) {
         return error(
-          "Group settings can only be changed using admin group editing.",
+          "Group settings can only be changed by an admin.",
           403
         );
       }
 
-      const existingIds = new Set(
-        current.state.groups.map(group => group.id)
-      );
-
-      if (!existingIds.has(newState.selected)) {
+      if (!newState.groups.some(
+        group => group.id === newState.selected
+      )) {
         return error("The selected group does not exist.", 400);
       }
 
@@ -387,11 +325,12 @@ export default async function handler(request) {
       });
     }
 
-    return json(
-      { error: "Method not allowed." },
-      405,
-      { Allow: "GET, POST, PUT, PATCH" }
-    );
+    return json({
+      error: "Method not allowed."
+    }, 405, {
+      Allow: "GET, POST, PUT, PATCH"
+    });
+
   } catch (err) {
     console.error("Skillfolio API error:", err);
 
