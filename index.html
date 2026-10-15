@@ -217,6 +217,7 @@
     $("lockAdmin").hidden = !isAdmin;
     $("addGroup").hidden = !isAdmin;
     $("editGroup").hidden = !isAdmin;
+    $("addCourse").hidden = !isAdmin;
   }
   async function apiRequest(method = "GET", payload = null) {
     const options = {method, headers: {"Content-Type": "application/json"}, credentials: "same-origin"};
@@ -366,7 +367,14 @@
       node.className = "node" + (c.done ? " done" : "");
       node.textContent = c.done ? "✓" : String(index + 1).padStart(2, "0");
       node.title = "Toggle completion";
-      node.onclick = () => { c.done = !c.done; save(); };
+      node.disabled = !isAdmin;
+      node.title = isAdmin ? "Toggle completion" : "Unlock editing to change completion";
+      node.style.cursor = isAdmin ? "pointer" : "default";
+      node.onclick = () => {
+        if (!isAdmin) return;
+        c.done = !c.done;
+        save();
+      };
       const content = document.createElement("div");
       content.className = "node-content";
       content.innerHTML = `<div class="node-title">${safe(c.name)}</div><div class="node-meta">${c.done ? "✓ COMPLETED" : "○ IN PROGRESS"}${c.date ? " · " + safe(c.date) : ""}</div>${c.description ? `<div class="node-description">${safe(c.description)}</div>` : ""}`;
@@ -395,11 +403,10 @@
       const remove = document.createElement("button");
       remove.className = "small-button"; remove.textContent = "Delete";
       remove.onclick = () => { if (confirm("Delete this milestone?")) { selected.courses = selected.courses.filter(x => x.id !== c.id); save(); } };
-      if (isAdmin) {
-         actions.append(edit, remove);
-      }
-      content.append(actions); 
-      row.append(node, content); road.append(row);
+      if (isAdmin) actions.append(edit, remove);
+      if (isAdmin) content.append(actions);
+      row.append(node, content);
+      road.append(row);
     });
   }
 
@@ -436,7 +443,13 @@
   $("lockAdmin").onclick = lockAdmin;
   $("addGroup").onclick = () => { if (isAdmin) openGroup(); };
   $("editGroup").onclick = () => { const g = activeGroup(); if (isAdmin && g) openGroup(g.id); };
-  $("addCourse").onclick = () => openCourse();
+  $("addCourse").onclick = () => {
+    if (!isAdmin) {
+      alert("Unlock editing with the admin password first.");
+      return;
+    }
+    openCourse();
+  };
   document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => b.closest("dialog").close());
   $("groupImage").onchange = async e => { const f = e.target.files[0]; if (f) { if (f.size > 500000) return alert("For this demo, choose an icon under 500 KB."); pendingGroupImage = await fileData(f); } };
   $("courseFile").onchange = async e => { const f = e.target.files[0]; if (f) { if (f.size > 300000) return alert("For this demo, choose a certificate under 300 KB. Cloud storage will support larger files."); pendingCertificate = await fileData(f); } };
@@ -459,6 +472,10 @@
 
   $("courseForm").onsubmit = e => {
     e.preventDefault();
+    if (!isAdmin) {
+      alert("Unlock editing with the admin password first.");
+      return;
+    }
     const g = activeGroup();
     if (!g) return;
     let c = g.courses.find(x => x.id === editingCourse);
